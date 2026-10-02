@@ -1,0 +1,832 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#18302b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>JinxO Deck</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@700;900&display=swap" rel="stylesheet" crossorigin="anonymous">
+<style>
+:root {
+  /* print colours measured from the real cards */
+  --yellow: #F6D44E;
+  --teal: #1E9C80;
+  --orange: #EE7042;
+  --magenta: #C8166C;
+  --ink: #1B1B1B;
+  /* table */
+  --felt: #18302b;
+  --felt-2: #10231f;
+  --text: #EAF2EE;
+  --muted: #9FB8B0;
+  --line: rgba(255,255,255,.14);
+  --btn: rgba(255,255,255,.08);
+  --btn-press: rgba(255,255,255,.16);
+  --font: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  color-scheme: dark;
+}
+/* The cards are fixed print colours; the table stays dark in both schemes so they pop. */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --felt: #18302b; } }
+:root[data-theme="dark"] { --felt: #18302b; }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: radial-gradient(120% 80% at 50% 35%, var(--felt) 0%, var(--felt-2) 100%) fixed, var(--felt-2);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;   /* no double-tap zoom anywhere */
+}
+.app {
+  /* fixed root: iOS Safari can't rubber-band the page when there is nothing to scroll */
+  position: fixed; inset: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "head" "stage" "tray" "ctrl";
+  padding: max(10px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           max(12px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  gap: 10px;
+  max-width: 640px;
+  margin: 0 auto;
+}
+header { grid-area: head; }
+#stageSlot { grid-area: stage; }
+.tray { grid-area: tray; }
+.controls { grid-area: ctrl; }
+
+/* Landscape phones and other short screens: stage on the left, tray and controls in a side column. */
+@media (orientation: landscape) and (max-height: 600px) {
+  .app {
+    max-width: none;
+    grid-template-columns: minmax(0, 1fr) clamp(240px, 36vw, 340px);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas: "head head" "stage tray" "stage ctrl";
+    column-gap: 20px;
+  }
+  .tray { height: auto; min-height: 0; align-self: center; aspect-ratio: 2.4; max-height: 100%; }
+  .controls { padding-top: 0; }
+  .controls button { height: 46px; }
+}
+/* Icon-only buttons whenever the button row itself is too narrow for labels
+   (Galaxy Fold, zoomed iPhone SE, the side column of a small landscape phone). */
+.controls { container-type: inline-size; }
+@container (max-width: 290px) { .controls button .t { display: none; } }
+@media (max-width: 340px) { .info { min-width: 64px; } }
+
+/* header */
+header { display: flex; align-items: center; justify-content: space-between; height: 36px; }
+.wordmark { font-weight: 900; font-size: 20px; letter-spacing: -.02em; display: flex; align-items: center; gap: 1px; }
+.wordmark .o {
+  display: inline-block; width: 18px; height: 18px; border-radius: 50%;
+  border: 4px solid var(--yellow); margin-left: 2px; transform: translateY(1px);
+}
+.counter { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; color: var(--muted); }
+.counter b { color: var(--text); font-size: 18px; }
+
+/* stage */
+#stageSlot { position: relative; display: grid; place-items: center; }
+.hint {
+  text-align: center; color: var(--muted); font-size: 15px; line-height: 1.6;
+  opacity: 0; transition: opacity .3s;
+}
+body.start .hint { opacity: 1; }
+.hint strong { color: var(--text); display: block; font-size: 18px; margin-bottom: 2px; }
+
+/* tray: deck · info · discard */
+.tray {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  height: clamp(108px, 17dvh, 150px); gap: 8px;
+}
+.slot { height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 4px; }
+.slot .pad { position: relative; min-height: 0; display: grid; place-items: center; }   /* cards sit here */
+.slot .label { text-align: center; font-size: 11px; line-height: 14px; color: var(--muted); font-weight: 700; letter-spacing: .02em; }
+.slot .outline {
+  width: 76%; height: 94%; border-radius: 10px; border: 2px dashed var(--line);
+  display: grid; place-items: center; font-size: 12px; color: var(--muted); text-align: center;
+  opacity: 0; transition: opacity .3s;
+}
+body.empty #deckSlot .outline, body.nodiscard #discardSlot .outline { opacity: 1; }
+.info { text-align: center; min-width: 88px; }
+.info .big { font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
+.info .small { font-size: 11px; color: var(--muted); margin-top: 4px; font-weight: 700; }
+
+/* controls */
+.controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-top: 4px; }
+button {
+  appearance: none; border: 1px solid var(--line); background: var(--btn); color: var(--text);
+  font: inherit; font-weight: 700; font-size: 14px; height: 52px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; min-width: 0;
+  touch-action: manipulation; cursor: pointer; transition: background .15s, transform .15s, opacity .2s;
+}
+button:active { background: var(--btn-press); transform: scale(.97); }
+button:disabled { opacity: .35; pointer-events: none; }
+button:focus-visible { outline: 3px solid var(--yellow); outline-offset: 2px; }
+button svg { width: 20px; height: 20px; }
+button.primary { background: var(--yellow); color: var(--ink); border-color: transparent; }
+body.empty #shuffleBtn { background: var(--yellow); color: var(--ink); border-color: transparent; }
+
+/* ───────────── cards ───────────── */
+#table { position: fixed; inset: 0; pointer-events: none; z-index: 5; touch-action: none; }
+.card {
+  position: absolute; left: 0; top: 0;
+  width: var(--cw); height: var(--ch);
+  transform-origin: 50% 50%;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+  pointer-events: auto;
+  touch-action: none;
+  --r: calc(var(--cw) * .055);
+}
+/* No will-change: it freezes the raster scale, so a card growing from the 24% deck size would stay blurry.
+   WAAPI transform animations are promoted to compositor layers on their own. */
+.shadow {
+  position: absolute; inset: 0; border-radius: var(--r);
+  box-shadow: 0 14px 30px rgba(0,0,0,.38), 0 3px 6px rgba(0,0,0,.28);
+  transform: translateZ(-1px);
+}
+.face {
+  position: absolute; inset: 0; border-radius: var(--r); overflow: hidden;
+  backface-visibility: hidden; -webkit-backface-visibility: hidden;
+}
+.face::after {  /* paper edge */
+  content: ""; position: absolute; inset: 0; border-radius: inherit;
+  box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.28), inset 0 -2px 0 rgba(0,0,0,.08);
+  pointer-events: none;
+}
+.dots { background-image: radial-gradient(rgba(0,0,0,.075) 28%, transparent 31%); background-size: calc(var(--cw) * .032) calc(var(--cw) * .032); }
+.front { display: grid; grid-template-rows: 44fr 3fr 5fr 48fr; }
+.half { display: grid; place-items: center; padding: 5% 8%; min-height: 0; }
+.half.top { background-color: var(--yellow); color: var(--ink); }
+.half.bottom { background-color: var(--magenta); color: #fff; }
+.half.bottom p { transform: rotate(180deg); }
+.stripe.teal { background: var(--teal); }
+.stripe.orange { background: var(--orange); }
+.half p {
+  margin: 0; text-align: center; font-weight: 900; line-height: 1.3; letter-spacing: -.025em;
+  word-break: keep-all; overflow-wrap: anywhere; max-width: 100%;
+  text-wrap: balance;   /* no lone "것" on the last line */
+}
+.back { transform: rotateY(180deg); background-color: var(--magenta); display: grid; place-items: center; }
+.back .bands { position: absolute; left: 0; right: 0; top: 46%; height: 8%; display: grid; grid-template-rows: 3fr 5fr; }
+.back .bands i:first-child { background: var(--teal); }
+.back .bands i:last-child { background: var(--orange); }
+.back .ring {
+  position: relative; width: 46%; aspect-ratio: 1; border-radius: 50%;
+  border: calc(var(--cw) * .055) solid var(--yellow); background: var(--magenta);
+  display: grid; place-items: center;
+  box-shadow: 0 0 0 calc(var(--cw) * .018) var(--magenta);
+}
+.back .ring span { font-weight: 900; color: var(--yellow); font-size: calc(var(--cw) * .07); letter-spacing: -.02em; }
+
+/* confirm sheet */
+dialog {
+  border: 0; padding: 0; background: transparent; color: var(--text);
+  width: min(100% - 32px, 420px); margin: auto auto max(16px, env(safe-area-inset-bottom));
+}
+dialog::backdrop { background: rgba(0,0,0,.5); }
+.sheet { background: #213b35; border: 1px solid var(--line); border-radius: 20px; padding: 20px; }
+.sheet h2 { margin: 0 0 6px; font-size: 18px; }
+.sheet p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.sheet .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+dialog[open] .sheet { animation: up .22s cubic-bezier(.2,.8,.2,1); }
+@keyframes up { from { transform: translateY(24px); opacity: 0; } }
+
+.toast {
+  position: fixed; left: 50%; top: 50%; z-index: 20; pointer-events: none;
+  transform: translate(-50%, -50%); padding: 10px 18px; border-radius: 999px;
+  background: rgba(0,0,0,.72); color: #fff; font-weight: 700; font-size: 15px;
+  opacity: 0; transition: opacity .2s;
+}
+.toast.show { opacity: 1; }
+.fatal { position: fixed; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--muted); }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body class="start">
+<div class="app">
+  <header>
+    <div class="wordmark" aria-label="JinxO">Jinx<span class="o"></span></div>
+    <div class="counter"><b id="posNum">0</b> / <span id="total">0</span></div>
+  </header>
+
+  <main id="stageSlot">
+    <div class="hint"><strong>덱을 탭해서 뒤집기</strong>카드를 밀어서 넘기거나<br>화면을 탭해도 돼요</div>
+  </main>
+
+  <section class="tray" aria-label="덱">
+    <div class="slot" id="deckSlot"><div class="pad"><div class="outline">다 뽑았어요</div></div><div class="label">덱</div></div>
+    <div class="info"><div class="big" id="leftNum">0</div><div class="small">남은 카드</div></div>
+    <div class="slot" id="discardSlot"><div class="pad"><div class="outline"></div></div><div class="label">버린 카드</div></div>
+  </section>
+
+  <nav class="controls">
+    <button id="undoBtn" aria-label="되돌리기 (←)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><span class="t">되돌리기</span></button>
+    <button id="rotateBtn" aria-label="180도 돌리기 (R)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg><span class="t">돌리기</span></button>
+    <button id="shuffleBtn" aria-label="섞기 (S)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="M4 4l5 5"/></svg><span class="t">섞기</span></button>
+  </nav>
+</div>
+
+<div id="table" aria-hidden="true"></div>
+<div class="sr" aria-live="polite" id="live"></div>
+<div class="toast" id="toast" role="status"></div>
+
+<dialog id="confirm">
+  <form method="dialog" class="sheet">
+    <h2>덱을 다시 섞을까요?</h2>
+    <p>뒤집은 카드를 모두 모아서 처음부터 새로 섞어요.</p>
+    <div class="row">
+      <button value="cancel">취소</button>
+      <button value="ok" class="primary">섞기</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="cards.js"></script>
+<script>
+(() => {
+'use strict';
+
+// ───────────── data & persistence ─────────────
+const CARDS = window.CARDS || [];
+const N = CARDS.length;
+if (!N) {
+  document.body.innerHTML = '<div class="fatal">카드 데이터를 불러오지 못했어요.<br>cards.js가 index.html과 같은 폴더에 있는지 확인하세요.</div>';
+  return;
+}
+const byId = new Map(CARDS.map(c => [c.id, c]));
+const KEY = 'jinxo-deck';
+
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+const DATA_HASH = hashStr(JSON.stringify(CARDS));
+
+function randInt(n) {                       // unbiased integer in [0, n)
+  const buf = new Uint32Array(1), limit = Math.floor(2 ** 32 / n) * n;
+  let x;
+  do { crypto.getRandomValues(buf); x = buf[0]; } while (x >= limit);
+  return x % n;
+}
+function shuffled(ids) {                    // Fisher–Yates
+  const a = ids.slice();
+  for (let i = a.length - 1; i > 0; i--) { const j = randInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+function freshState() {
+  return { v: 1, dataHash: DATA_HASH, order: shuffled(CARDS.map(c => c.id)), pos: 0, rotated: false };
+}
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(KEY));
+    if (s && s.v === 1 && s.dataHash === DATA_HASH && Array.isArray(s.order) && s.order.length === N &&
+        s.order.every(id => byId.has(id)) && Number.isInteger(s.pos) && s.pos >= 0 && s.pos <= N) return s;
+  } catch {}
+  return null;
+}
+function save() {
+  try { state.savedAt = Date.now(); localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+}
+
+let state = load();
+const firstVisit = !state;
+if (!state) { state = freshState(); save(); }
+
+// ───────────── geometry ─────────────
+const $ = s => document.querySelector(s);
+const table = $('#table');
+const RATIO = 1.2;          // card height / width on screen (the real strip is wider; taller reads better on a phone)
+const PERSP = 1600;
+const DECK_VIS = 6;         // back-faces drawn for the deck's thickness
+const DISC_VIS = 4;         // face-up cards kept in the discard pile
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+let G = null;
+
+function measure() {
+  const st = $('#stageSlot').getBoundingClientRect();
+  const W = Math.round(Math.min(st.width * 0.96, st.height * 0.97 / RATIO, 480));
+  const H = Math.round(W * RATIO);
+  const slot = el => {
+    const r = el.getBoundingClientRect();
+    const s = Math.min(r.width * 0.8 / W, r.height * 0.94 / H);
+    return { x: r.left + r.width / 2 - W / 2, y: r.top + r.height / 2 - H / 2, s };
+  };
+  const stage = { x: st.left + st.width / 2 - W / 2, y: st.top + st.height / 2 - H / 2, s: 1 };
+  G = {
+    W, H, stage,
+    deck: slot($('#deckSlot .pad')),
+    discard: slot($('#discardSlot .pad')),
+    mix: { x: stage.x, y: stage.y, s: 0.52 },
+  };
+  table.style.setProperty('--cw', W + 'px');
+  table.style.setProperty('--ch', H + 'px');
+}
+
+// A pose is { slot | at:{x,y,s}, dx, dy, s, rz, rx, ry }. All motion is this one transform.
+function T(p) {
+  const b = p.at || G[p.slot];
+  const s = b.s * (p.s ?? 1);
+  return `translate3d(${(b.x + (p.dx || 0)).toFixed(2)}px,${(b.y + (p.dy || 0)).toFixed(2)}px,0) ` +
+         `perspective(${PERSP}px) scale(${s.toFixed(4)}) ` +
+         `rotateZ(${(p.rz || 0).toFixed(2)}deg) rotateX(${(p.rx || 0).toFixed(2)}deg) rotateY(${(p.ry || 0).toFixed(2)}deg)`;
+}
+const lerp = (a, b, t) => a + (b - a) * t;
+function abs(p) {             // resolve a pose to absolute coordinates (for interpolating between slots)
+  const b = p.at || G[p.slot];
+  return { x: b.x + (p.dx || 0), y: b.y + (p.dy || 0), s: b.s * (p.s ?? 1) };
+}
+function between(a, b, t, extra) {
+  const A = abs(a), B = abs(b);
+  return { at: { x: lerp(A.x, B.x, t), y: lerp(A.y, B.y, t), s: lerp(A.s, B.s, t) }, ...extra };
+}
+
+const thick = () => Math.max(1, 1.6 * G.deck.s / 0.24);
+const deckTopPose = deckCount => ({ slot: 'deck', dy: -(Math.min(DECK_VIS, Math.max(1, deckCount)) - 1) * thick(), ry: 180 });
+function jitter(id, k) { return (((id * 2654435761 + k * 40503) >>> 0) % 1000) / 1000; }
+const discardPose = id => ({ slot: 'discard', rz: (jitter(id, 1) - .5) * 16, dx: (jitter(id, 2) - .5) * 8, dy: (jitter(id, 3) - .5) * 6 });
+const stagePose = () => ({ slot: 'stage', rz: state.rotated ? 180 : 0 });
+
+// ───────────── card nodes ─────────────
+const nodes = new Map();       // key → element. 'b<i>' = deck back, 'c<id>' = face card
+
+function makeCard(id) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  let html = '<div class="shadow"></div>';
+  if (id != null) {
+    const c = byId.get(id);
+    html += `<div class="face front"><div class="half top dots"><p></p></div><div class="stripe teal"></div>` +
+            `<div class="stripe orange"></div><div class="half bottom dots"><p></p></div></div>`;
+    el.innerHTML = html + backHTML;
+    const ps = el.querySelectorAll('.half p');
+    ps[0].textContent = c.sentences[0];
+    ps[1].textContent = c.sentences[1];
+    el.dataset.id = id;
+  } else {
+    el.innerHTML = html + backHTML;
+  }
+  return el;
+}
+const backHTML = '<div class="face back dots"><div class="bands"><i></i><i></i></div><div class="ring"><span>JinxO</span></div></div>';
+
+// Shrink text until it fits its half in ≤ 3 lines, then use the smaller size for both halves so the
+// card reads as one design. Measured at the card's base size (transforms don't affect layout).
+function fitCard(el) {
+  const ps = [...el.querySelectorAll('.half p')];
+  const sizes = ps.map(p => {
+    const box = p.parentElement;
+    const maxH = box.clientHeight * 0.9, maxW = box.clientWidth * 0.84;
+    let fs = G.W * 0.084;
+    p.style.fontSize = fs + 'px';
+    while (fs > 10 && (p.scrollHeight > maxH || p.scrollHeight / (fs * 1.3) > 3.2 || p.scrollWidth > maxW + 1)) {
+      fs *= 0.94;
+      p.style.fontSize = fs + 'px';
+    }
+    return fs;
+  });
+  const fs = Math.min(...sizes);
+  for (const p of ps) p.style.fontSize = fs + 'px';
+}
+
+function addNode(key, id, pose, z) {
+  nodes.get(key)?.remove();
+  const el = makeCard(id);
+  el.style.transform = T(pose);
+  el.style.zIndex = z;
+  table.appendChild(el);
+  if (id != null) fitCard(el);
+  nodes.set(key, el);
+  return el;
+}
+
+function desired() {
+  const list = [];
+  const deckCount = N - state.pos;
+  for (let i = 0; i < Math.min(DECK_VIS, deckCount); i++)
+    list.push({ key: 'b' + i, id: null, role: 'deck', pose: { slot: 'deck', dy: -i * thick(), ry: 180 }, z: 1 + i });
+  const discEnd = Math.max(0, state.pos - 1);
+  state.order.slice(Math.max(0, discEnd - DISC_VIS), discEnd).forEach((id, i) =>
+    list.push({ key: 'c' + id, id, role: 'discard', pose: discardPose(id), z: 20 + i }));
+  if (state.pos > 0) {
+    const id = state.order[state.pos - 1];
+    list.push({ key: 'c' + id, id, role: 'stage', pose: stagePose(), z: 50 });
+  }
+  return list;
+}
+
+// Make the DOM match the state exactly: reuse nodes by key, create missing, drop extras.
+function reconcile() {
+  const keep = new Set();
+  for (const d of desired()) {
+    let el = nodes.get(d.key);
+    if (!el) el = addNode(d.key, d.id, d.pose, d.z);
+    for (const a of el.getAnimations({ subtree: true })) a.cancel();
+    el.style.transform = T(d.pose);
+    el.style.zIndex = d.z;
+    el.style.opacity = '';
+    el.dataset.role = d.role;
+    keep.add(d.key);
+  }
+  for (const [k, el] of nodes) if (!keep.has(k)) { el.remove(); nodes.delete(k); }
+  updateUI();
+}
+
+function rebuild() {            // after a resize: new base size → recreate and refit everything
+  needsRebuild = false;
+  for (const el of nodes.values()) el.remove();
+  nodes.clear();
+  measure();
+  reconcile();
+}
+
+// ───────────── animation helpers ─────────────
+const running = new Set();
+let speed = 1;
+function go(el, frames, opts) {
+  if (reduceMotion.matches) opts = { ...opts, duration: 0, delay: 0 };
+  const a = el.animate(frames, { fill: 'forwards', ...opts });
+  a.playbackRate = speed;
+  running.add(a);
+  return a.finished.catch(() => {}).finally(() => running.delete(a));
+}
+function shadowLift(el, dur, delay = 0) {
+  const sh = el.querySelector('.shadow');
+  if (!sh || reduceMotion.matches) return;
+  sh.animate([
+    { opacity: 1, transform: 'translateZ(-1px)' },
+    { opacity: .55, transform: 'translateZ(-1px) translateY(14%) scale(.94)', offset: .45 },
+    { opacity: 1, transform: 'translateZ(-1px)' },
+  ], { duration: dur, delay, easing: 'ease-in-out' });
+}
+function fadeIn(el) {
+  if (reduceMotion.matches) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160 });
+}
+const haptic = (ms = 8) => {   // Android only; browsers block vibration until the user has interacted
+  try { if (navigator.vibrate && navigator.userActivation?.hasBeenActive !== false) navigator.vibrate(ms); } catch {}
+};
+
+// One action at a time; a tap during an animation speeds it up and queues (at most) one more.
+let busy = false, pending = null, needsRebuild = false;
+function run(fn) {
+  if (busy) {
+    pending = fn;
+    speed = 3;
+    for (const a of running) a.playbackRate = 3;
+    return;
+  }
+  busy = true;
+  Promise.resolve().then(fn).catch(console.error).finally(() => {
+    busy = false;
+    speed = 1;
+    if (needsRebuild) rebuild(); else reconcile();
+    save();
+    if (pending) { const p = pending; pending = null; run(p); }
+  });
+}
+
+// ───────────── actions ─────────────
+async function flip() {
+  if (state.pos >= N) { nudgeShuffle(); return; }
+  const prevId = state.pos > 0 ? state.order[state.pos - 1] : null;
+  const nextId = state.order[state.pos];
+  const from = deckTopPose(N - state.pos);
+  const el = addNode('c' + nextId, nextId, from, 100);
+  el.dataset.role = 'flying';
+  // the flying card now covers the top back-face; hide that one so its shadow doesn't double up
+  const topBack = nodes.get('b' + (Math.min(DECK_VIS, N - state.pos) - 1));
+  if (topBack && N - state.pos <= DECK_VIS) topBack.style.opacity = '0';
+
+  state.pos++;
+  state.rotated = false;
+  save();
+  updateUI();
+
+  const tasks = [];
+  if (prevId != null) {
+    const pe = nodes.get('c' + prevId);
+    if (pe) {
+      pe.style.zIndex = 60;
+      tasks.push(go(pe, [{ transform: T(discardPose(prevId)) }], { duration: 300, easing: 'cubic-bezier(.45,0,.55,1)' }));
+    }
+  }
+  const to = stagePose();
+  const delay = prevId != null ? 110 : 0;
+  tasks.push(go(el, [
+    { transform: T(from), easing: 'cubic-bezier(.3,0,.5,1)' },
+    { transform: T({ ...from, dy: from.dy - 10, s: 1.08 }), offset: .12, easing: 'cubic-bezier(.25,.6,.4,1)' },
+    { transform: T(between(from, to, .55, { ry: 90, rx: 14, s: 1 })), offset: .55, easing: 'cubic-bezier(.2,.7,.3,1)' },
+    { transform: T({ ...to, s: 1.035 }), offset: .86, easing: 'ease-out' },
+    { transform: T(to) },
+  ], { duration: 640, delay }));
+  shadowLift(el, 640, delay);
+  setTimeout(() => haptic(), delay + 520);
+  await Promise.all(tasks);
+  fadeIn(el);
+}
+
+async function undo() {
+  if (state.pos === 0) return;
+  const curId = state.order[state.pos - 1];
+  const prevId = state.pos > 1 ? state.order[state.pos - 2] : null;
+  const ce = nodes.get('c' + curId);
+  const fromStage = stagePose();
+  state.pos--;
+  state.rotated = false;
+  save();
+  updateUI();
+  const to = deckTopPose(N - state.pos);
+  const tasks = [];
+  if (ce) {
+    ce.style.zIndex = 100;
+    tasks.push(go(ce, [
+      { transform: T(fromStage), easing: 'cubic-bezier(.4,0,.6,1)' },
+      { transform: T(between(fromStage, to, .45, { ry: 90, rx: -14, rz: fromStage.rz / 2 })), offset: .45, easing: 'cubic-bezier(.3,.6,.4,1)' },
+      { transform: T(to) },
+    ], { duration: 520, easing: 'linear' }));
+    shadowLift(ce, 520);
+  }
+  if (prevId != null) {
+    const pe = nodes.get('c' + prevId) || addNode('c' + prevId, prevId, discardPose(prevId), 19);
+    pe.style.zIndex = 55;
+    tasks.push(go(pe, [{ transform: T(discardPose(prevId)) }, { transform: T(stagePose()) }],
+      { duration: 380, delay: 120, easing: 'cubic-bezier(.2,.8,.2,1)' }));
+  }
+  await Promise.all(tasks);
+}
+
+async function rotate() {
+  if (state.pos === 0) return;
+  const el = nodes.get('c' + state.order[state.pos - 1]);
+  const from = state.rotated ? 180 : 0;
+  state.rotated = !state.rotated;
+  save();
+  if (!el) return;
+  haptic(6);
+  await go(el, [
+    { transform: T({ slot: 'stage', rz: from }) },
+    { transform: T({ slot: 'stage', rz: from + 90, s: .94 }), offset: .45 },
+    { transform: T({ slot: 'stage', rz: from + 180 }) },
+  ], { duration: 520, easing: 'cubic-bezier(.34,1.25,.64,1)' });
+  // rz 360 ≡ 0: reconcile() normalises without a visible jump
+}
+
+async function shuffle(newOrder = true) {
+  updateUI(true);
+  // 1. gather everything face-down into the middle of the table
+  const pile = [];
+  for (let i = 0; i < DECK_VIS; i++) {
+    const el = nodes.get('b' + i) || addNode('b' + i, null, deckTopPose(N - state.pos), 1 + i);
+    el.style.opacity = '';
+    pile.push(el);
+  }
+  const mixPose = i => ({ slot: 'mix', dy: -i * 2, ry: 180 });
+  const faces = [...nodes.entries()].filter(([k]) => k[0] === 'c').map(([, el]) => el);
+  const gather = pile.map((el, i) => go(el, [{ transform: T(mixPose(i)) }],
+    { duration: 420, delay: i * 25, easing: 'cubic-bezier(.3,.7,.2,1)' }));
+  faces.forEach((el, i) => {
+    el.style.zIndex = 30 + i;
+    gather.push(go(el, [{ transform: T({ ...mixPose(DECK_VIS), ry: 180, rz: (jitter(i, 4) - .5) * 20 }) }],
+      { duration: 460, delay: 60 + i * 40, easing: 'cubic-bezier(.3,.7,.2,1)' }));
+  });
+  await Promise.all(gather);
+  for (const el of faces) { el.remove(); }
+  for (const [k] of [...nodes]) if (k[0] === 'c') nodes.delete(k);
+
+  // 2–3. riffle twice: split into two tilted halves, then interleave them back
+  // halves split apart but stay on screen, even on a 320px-wide phone
+  const split = Math.max(24, Math.min(G.W * G.mix.s * 0.56, innerWidth / 2 - G.W * G.mix.s / 2 - 6));
+  let order = pile.slice();
+  for (let round = 0; round < 2; round++) {
+    const left = order.filter((_, i) => i % 2 === 0), right = order.filter((_, i) => i % 2 === 1);
+    await Promise.all([
+      ...left.map((el, i) => go(el, [{ transform: T({ slot: 'mix', dx: -split, dy: -i * 2, rz: -7, ry: 180 }) }],
+        { duration: 240, easing: 'cubic-bezier(.3,.7,.3,1)' })),
+      ...right.map((el, i) => go(el, [{ transform: T({ slot: 'mix', dx: split, dy: -i * 2 - 6, rz: 7, ry: 180 }) }],
+        { duration: 240, easing: 'cubic-bezier(.3,.7,.3,1)' })),
+    ]);
+    // interleave: bottom-up, alternating sides at random like a real riffle
+    const merged = [];
+    const L = left.slice(), R = right.slice();
+    while (L.length || R.length) merged.push((R.length && (!L.length || randInt(2))) ? R.shift() : L.shift());
+    await Promise.all(merged.map((el, k) => {
+      el.style.zIndex = 1 + k;
+      if (!reduceMotion.matches) setTimeout(() => haptic(4), k * 55 / speed);
+      return go(el, [
+        { transform: T({ slot: 'mix', dy: -k * 2 - 10, rz: 0, ry: 180, s: 1.01 }), offset: .6 },
+        { transform: T({ slot: 'mix', dy: -k * 2, ry: 180 }) },
+      ], { duration: 200, delay: 60 + k * 55, easing: 'cubic-bezier(.3,.6,.4,1)' });
+    }));
+    order = merged;
+  }
+  // 4. square up with a small pulse, then the real shuffle happens
+  await Promise.all(order.map((el, k) => go(el, [
+    { transform: T({ slot: 'mix', dy: -k * 2, ry: 180, s: 1.04 }) },
+    { transform: T({ slot: 'mix', dy: -k * 2, ry: 180 }) },
+  ], { duration: 180, easing: 'ease-out' })));
+  if (newOrder) state = freshState();
+  save();
+  if (reduceMotion.matches) toast('섞었어요');
+  // 5. back to the deck slot
+  await Promise.all(order.map((el, k) => go(el, [{ transform: T({ slot: 'deck', dy: -k * thick(), ry: 180 }) }],
+    { duration: 420, delay: (order.length - k) * 18, easing: 'cubic-bezier(.3,.7,.2,1)' })));
+  order.forEach((el, k) => nodes.set('b' + k, el));   // keep the visual order: no swap-flash at the end
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1200);
+}
+
+function nudgeShuffle() {
+  toast('카드를 다 뽑았어요 — 섞어 주세요');
+  const b = $('#shuffleBtn');
+  b.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: 300 });
+  haptic(15);
+}
+
+function askShuffle() {
+  if (busy) return;
+  if (state.pos === 0 || state.pos === N) { run(() => shuffle()); return; }
+  const dlg = $('#confirm');
+  dlg.returnValue = '';
+  dlg.showModal();
+  dlg.onclick = e => { if (e.target === dlg) dlg.close('cancel'); };   // tap outside the sheet
+  dlg.addEventListener('close', () => { if (dlg.returnValue === 'ok') run(() => shuffle()); }, { once: true });
+}
+
+// ───────────── UI ─────────────
+function updateUI(shuffling = false) {
+  $('#posNum').textContent = state.pos;
+  $('#total').textContent = N;
+  $('#leftNum').textContent = N - state.pos;
+  document.body.classList.toggle('start', state.pos === 0 && !shuffling);
+  document.body.classList.toggle('empty', state.pos === N);
+  document.body.classList.toggle('nodiscard', state.pos <= 1 || shuffling);
+  $('#undoBtn').disabled = state.pos === 0;
+  $('#rotateBtn').disabled = state.pos === 0;
+  if (state.pos > 0) {
+    const c = byId.get(state.order[state.pos - 1]);
+    const text = `${state.pos}번째 카드: ${c.sentences.join(' / ')}`;
+    if ($('#live').textContent !== text) $('#live').textContent = text;
+  }
+}
+
+$('#undoBtn').addEventListener('click', () => run(undo));
+$('#rotateBtn').addEventListener('click', () => run(rotate));
+$('#shuffleBtn').addEventListener('click', askShuffle);
+
+// Taps on the deck or stage flip; the stage card can be dragged and flung away.
+let drag = null;
+table.addEventListener('pointerdown', e => {
+  const el = e.target.closest('.card');
+  if (!el || e.button > 0) return;
+  const role = el.dataset.role;
+  drag = { el, role, x0: e.clientX, y0: e.clientY, t0: performance.now(), dx: 0, dy: 0, moved: false, id: e.pointerId, hist: [] };
+  try { el.setPointerCapture(e.pointerId); } catch {}
+});
+table.addEventListener('pointermove', e => {
+  if (!drag || e.pointerId !== drag.id) return;
+  drag.dx = e.clientX - drag.x0;
+  drag.dy = e.clientY - drag.y0;
+  drag.hist.push([performance.now(), e.clientX, e.clientY]);
+  if (drag.hist.length > 5) drag.hist.shift();
+  if (Math.hypot(drag.dx, drag.dy) > 8) drag.moved = true;
+  if (drag.role === 'stage' && drag.moved && !busy) {
+    const base = stagePose();
+    drag.el.style.transform = T({ ...base, dx: drag.dx, dy: drag.dy * 0.5, rz: base.rz + drag.dx / G.W * 14, s: 1.02 });
+  }
+});
+function endDrag(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const d = drag;
+  drag = null;
+  const dt = performance.now() - d.t0;
+  if (e.type === 'pointercancel') {      // the OS took the gesture (edge swipe, scroll, call): never act on it
+    if (d.role === 'stage' && d.moved && !busy) springBack(d.el);
+    return;
+  }
+  if (!d.moved && dt < 400) {
+    if (d.role === 'deck' || d.role === 'stage' || d.role === 'flying') run(flip);
+    return;
+  }
+  if (d.role !== 'stage' || busy) return;
+  const h = d.hist, v = h.length > 1 ? Math.hypot(h.at(-1)[1] - h[0][1], h.at(-1)[2] - h[0][2]) / Math.max(1, h.at(-1)[0] - h[0][0]) : 0;
+  if (Math.abs(d.dx) > G.W * 0.3 || Math.abs(d.dy) > G.H * 0.25 || v > 0.5) {
+    run(flip);
+  } else {
+    springBack(d.el);
+  }
+}
+function springBack(el) {
+  go(el, [{ transform: T(stagePose()) }], { duration: 320, easing: 'cubic-bezier(.34,1.4,.64,1)' })
+    .then(() => { if (!busy && !drag) reconcile(); });
+}
+table.addEventListener('pointerup', endDrag);
+table.addEventListener('pointercancel', endDrag);
+// tapping the empty stage (before the first card) also flips
+$('#stageSlot').addEventListener('click', () => { if (state.pos === 0) run(flip); });
+
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat && e.key !== 'ArrowRight' || $('#confirm').open) return;
+  const onControl = e.target instanceof Element && e.target.closest('button, a, input, select, textarea');
+  if ((e.key === ' ' || e.key === 'Enter') && onControl) return;   // let the focused button do its thing
+  if (e.key === ' ' || e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); run(flip); }
+  else if (e.key === 'ArrowLeft') run(undo);
+  else if (e.key === 'r' || e.key === 'R') run(rotate);
+  else if (e.key === 's' || e.key === 'S') askShuffle();
+});
+
+// Re-measure whenever the layout changes (rotation, split view, URL bar, font load) — never mid-animation.
+let lastBox = '';
+let resizeTimer;
+new ResizeObserver(() => {
+  const r = $('#stageSlot').getBoundingClientRect(), t = $('#deckSlot .pad').getBoundingClientRect();
+  const box = [r.width, r.height, r.left, r.top, t.width, t.height, t.left, t.top].map(Math.round).join();
+  if (box === lastBox) return;
+  lastBox = box;
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (busy) needsRebuild = true; else rebuild(); }, 120);
+}).observe($('.app'));
+
+// keep the screen awake during a game
+let wakeLock = null;
+async function keepAwake() {
+  if (!('wakeLock' in navigator) || document.visibilityState !== 'visible' || (wakeLock && !wakeLock.released)) return;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch {}
+}
+document.addEventListener('visibilitychange', keepAwake);
+document.addEventListener('pointerup', keepAwake);
+keepAwake();
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// ───────────── start ─────────────
+measure();
+reconcile();
+function refitAll() { for (const el of nodes.values()) if (el.dataset.id) fitCard(el); }
+if (document.fonts) {
+  document.fonts.ready.then(refitAll);
+  document.fonts.addEventListener('loadingdone', refitAll);
+}
+if (firstVisit) run(() => shuffle(false));
+// Debug/test hook: check the DOM matches the state exactly (call when idle).
+window.__deck = {
+  get state() { return state; }, get busy() { return busy; }, nodes, run, flip, undo, rotate, shuffle,
+  check() {
+    const errs = [];
+    const want = desired();
+    const cards = document.querySelectorAll('#table .card');
+    if (cards.length !== want.length) errs.push(`card nodes ${cards.length} ≠ desired ${want.length}`);
+    if (nodes.size !== want.length) errs.push(`map size ${nodes.size} ≠ desired ${want.length}`);
+    for (const d of want) {
+      const el = nodes.get(d.key);
+      if (!el) { errs.push('missing ' + d.key); continue; }
+      if (!el.isConnected) errs.push('detached ' + d.key);
+      if (el.getAnimations().length) errs.push('lingering animation on ' + d.key);
+      const probe = document.createElement('div');           // compare in the browser's normalised form
+      probe.style.transform = T(d.pose);
+      if (el.style.transform !== probe.style.transform) errs.push('pose mismatch ' + d.key);
+      if (el.style.opacity) errs.push('opacity left on ' + d.key);
+      for (const p of el.querySelectorAll('.half p'))
+        if (p.scrollHeight > p.parentElement.clientHeight + 1) errs.push('text overflow ' + d.key);
+    }
+    if (state.pos > 0) {
+      const top = document.querySelector('.card[data-role=stage] .top p')?.textContent;
+      if (top !== byId.get(state.order[state.pos - 1]).sentences[0]) errs.push('stage shows wrong card');
+    }
+    if ($('#posNum').textContent !== String(state.pos)) errs.push('counter out of sync');
+    return errs;
+  },
+};
+})();
+</script>
+</body>
+</html>
